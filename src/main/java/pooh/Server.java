@@ -8,26 +8,41 @@ import java.net.Socket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+/**
+ * MultiThreading SocketServer.
+ * task : Техническое задание - проект "Pooh JMS" [#318329].
+ */
 public class Server {
-    private volatile static Storage storage = new Storage();
-    private static ExecutorService service = Executors.newFixedThreadPool(
+    private final Queues queues = new Queues();
+    private final Topics topics = new Topics();
+    private final ExecutorService service = Executors.newFixedThreadPool(
             Runtime.getRuntime().availableProcessors()
     );
 
-    public static void main(String[] args) throws InterruptedException {
-        try (ServerSocket server = new ServerSocket(5555)) {
-            while (!service.isTerminated()) {
+    /**
+     * When create instance of this class,
+     * creating new ServerSocket.
+     *
+     * @param port port.
+     */
+    public Server(int port) {
+        try (ServerSocket server = new ServerSocket(port)) {
+            while (!server.isClosed()) {
                 Socket socket = server.accept();
                 service.execute(
                         () -> {
+                            System.out.println(Thread.currentThread().getName() + " was connected");
                             try (var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                                  var out = socket.getOutputStream()) {
-                                StringBuilder sb = new StringBuilder();
-                                while (in.ready()) {
-                                    sb.append(in.readLine());
-                                    System.out.println(sb.toString());
-                                }
-                                String answer = action(sb);
+                                String str;
+                                String answer = "";
+                                do {
+                                    str = in.readLine();
+                                    if (containsRequest(str)) {
+                                        answer = action(str);
+                                    }
+                                } while (in.ready());
+                                out.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
                                 out.write(answer.getBytes());
                             } catch (Exception e) {
                                 e.printStackTrace();
@@ -40,26 +55,44 @@ public class Server {
         }
     }
 
-    private static String action(StringBuilder sb) {
+    /**
+     * Checking if request contains command.
+     *
+     * @param str line.
+     * @return true or false.
+     */
+    private boolean containsRequest(String str) {
+        return str.contains("Post/queue")
+                || str.contains("Get/queue")
+                || str.contains("Post/topic")
+                || str.contains("Get/topic");
+    }
+
+    /**
+     * Request processing
+     *
+     * @param request request.
+     * @return text or nothing.
+     */
+    private String action(String request) {
         String rsl = "";
-        String line = sb.toString();
-        if (line.contains("Post/queue")) {
-            storage.addToQueue(
-                    line.split(":")[1].split(",")[0],
-                    line.split(":")[2]
+        if (request.contains("Post/queue")) {
+            queues.addToQueue(
+                    request.split(":")[1].split(",")[0],
+                    request.split(":")[2]
             );
-        } else if (line.contains("Get/queue")) {
-            rsl = storage.getFromQueue(
-                    line.split(":")[1].split(",")[0]
+        } else if (request.contains("Get/queue")) {
+            rsl = queues.getFromQueue(
+                    request.split(":")[1].split(",")[0]
             );
-        } else if (line.contains("Post/topic")) {
-            storage.postTopic(
-                    line.split(":")[1].split(",")[0],
-                    line.split(":")[2]
+        } else if (request.contains("Post/topic")) {
+            topics.postTopic(
+                    request.split(":")[1].split(",")[0],
+                    request.split(":")[2]
             );
-        } else if (line.contains("Get/topic")) {
-            rsl = storage.getFromTopic(
-                    line.split(":")[1].split(",")[0]
+        } else if (request.contains("Get/topic")) {
+            rsl = topics.getFromTopic(
+                    request.split(":")[1].split(",")[0]
             );
         }
         return rsl;
